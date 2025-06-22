@@ -5,6 +5,10 @@
 /.pnp
 .pnp.js
 
+
+# Config files with sensitive data
+config.local.json
+
 # testing
 /coverage
 
