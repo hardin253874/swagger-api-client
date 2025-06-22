@@ -34,6 +34,7 @@ export const ApiTestPage: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedBimApi, setSelectedBimApi] = useState<string>('');
+  const [showRawJson, setShowRawJson] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -49,10 +50,6 @@ export const ApiTestPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  };
-
-  const updateRequestBody = (value: string) => {
-    setRequest(prev => ({ ...prev, body: value }));
   };
 
   const handleBimApiSelection = (selectedName: string) => {
@@ -127,12 +124,135 @@ export const ApiTestPage: React.FC = () => {
     }
   };
 
+  const updateRequestBody = (value: string) => {
+    setRequest(prev => ({ ...prev, body: value }));
+  };
+
   const formatJson = (data: any): string => {
     try {
       return JSON.stringify(data, null, 2);
     } catch {
       return String(data);
     }
+  };
+
+  const formatCleanedJson = (data: any): string => {
+    try {
+      // Create a deep copy of the data to avoid modifying the original
+      const cleanedData = JSON.parse(JSON.stringify(data));
+      
+      // Clean up the data by extracting URLs from message strings
+      if (cleanedData && typeof cleanedData === 'object') {
+        Object.keys(cleanedData).forEach(key => {
+          if (typeof cleanedData[key] === 'string') {
+            const extractedUrl = extractUrlFromMessage(cleanedData[key]);
+            if (extractedUrl && extractedUrl !== cleanedData[key]) {
+              // Replace the message with just the clean URL
+              cleanedData[key] = extractedUrl;
+            }
+          }
+        });
+      }
+      
+      return JSON.stringify(cleanedData, null, 2);
+    } catch {
+      return String(data);
+    }
+  };
+
+  const extractDownloadLinks = (responseData: any) => {
+    const links = [];
+    
+    if (responseData && typeof responseData === 'object') {
+      // Extract GLB URL (remove message text and get just the URL)
+      if (responseData.glbUrl) {
+        const glbUrl = extractUrlFromMessage(responseData.glbUrl);
+        if (glbUrl) {
+          links.push({
+            url: glbUrl,
+            title: 'Download GLB',
+            type: 'GLB',
+            icon: '📦'
+          });
+        }
+      }
+      
+      // Extract IFC URL (remove message text and get just the URL)
+      if (responseData.ifcUrl) {
+        const ifcUrl = extractUrlFromMessage(responseData.ifcUrl);
+        if (ifcUrl) {
+          links.push({
+            url: ifcUrl,
+            title: 'Download IFC',
+            type: 'IFC',
+            icon: '🏗️'
+          });
+        }
+      }
+
+      // Handle other common download URL patterns
+      if (responseData.downloadUrl) {
+        const downloadUrl = extractUrlFromMessage(responseData.downloadUrl);
+        if (downloadUrl) {
+          links.push({
+            url: downloadUrl,
+            title: 'Download File',
+            type: 'FILE',
+            icon: '📄'
+          });
+        }
+      }
+
+      if (responseData.modelUrl) {
+        const modelUrl = extractUrlFromMessage(responseData.modelUrl);
+        if (modelUrl) {
+          links.push({
+            url: modelUrl,
+            title: 'Download Model',
+            type: 'MODEL',
+            icon: '🏢'
+          });
+        }
+      }
+
+      // Handle array of files
+      if (responseData.files && Array.isArray(responseData.files)) {
+        responseData.files.forEach((file: any, index: number) => {
+          if (file.url) {
+            const extractedUrl = extractUrlFromMessage(file.url);
+            if (extractedUrl) {
+              links.push({
+                url: extractedUrl,
+                title: file.name || `Download File ${index + 1}`,
+                type: file.type || 'FILE',
+                icon: '📎'
+              });
+            }
+          }
+        });
+      }
+    }
+    
+    return links;
+  };
+
+  const extractUrlFromMessage = (messageOrUrl: string): string | null => {
+    if (!messageOrUrl || typeof messageOrUrl !== 'string') {
+      return null;
+    }
+
+    // Check if it's already a clean URL (starts with http/https)
+    if (messageOrUrl.startsWith('http://') || messageOrUrl.startsWith('https://')) {
+      // If it contains message text, extract just the URL part
+      const urlMatch = messageOrUrl.match(/(https?:\/\/[^\s]+)/);
+      return urlMatch ? urlMatch[1] : messageOrUrl;
+    }
+
+    // Look for URLs in message text (e.g., "GLB saved successfully at https://...")
+    const urlPattern = /(https?:\/\/[^\s]+)/;
+    const match = messageOrUrl.match(urlPattern);
+    
+    return match ? match[1] : null;
   };
 
   return (
@@ -162,6 +282,7 @@ export const ApiTestPage: React.FC = () => {
               value={selectedBimApi}
               onChange={(e) => handleBimApiSelection(e.target.value)}
               className="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              title="Select a predefined BIM API to auto-populate URL and Method"
             >
               <option value="">-- Select a BIM API --</option>
               {config.bimApiList.map((api) => (
@@ -170,6 +291,11 @@ export const ApiTestPage: React.FC = () => {
                 </option>
               ))}
             </select>
+            {selectedBimApi && (
+              <div className="text-xs text-gray-400 mt-1">
+                ✓ Selected: {selectedBimApi}
+              </div>
+            )}
           </div>
 
           {/* URL and Method */}
@@ -182,9 +308,9 @@ export const ApiTestPage: React.FC = () => {
                 type="text"
                 id="url"
                 value={request.url}
-                onChange={(e) => setRequest(prev => ({ ...prev, url: e.target.value }))}
+                onChange={(e) => handleUrlChange(e.target.value)}
                 className="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                placeholder="/api/endpoint"
+                placeholder={config.apiHost}
               />
             </div>
             
@@ -195,7 +321,7 @@ export const ApiTestPage: React.FC = () => {
               <select
                 id="method"
                 value={request.method}
-                onChange={(e) => setRequest(prev => ({ ...prev, method: e.target.value as HttpMethod['value'] }))}
+                onChange={(e) => handleMethodChange(e.target.value as HttpMethod['value'])}
                 className="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               >
                 {httpMethods.map(method => (
@@ -244,36 +370,189 @@ export const ApiTestPage: React.FC = () => {
           
           {response && (
             <div className="space-y-4">
-              {/* Status */}
-              <div className="flex items-center gap-4">
-                <span className={`px-3 py-1 rounded-full text-sm font-medium ${
-                  response.status >= 200 && response.status < 300
-                    ? 'bg-green-900 text-green-300 border border-green-700'
-                    : response.status >= 400
-                    ? 'bg-red-900 text-red-300 border border-red-700'
-                    : 'bg-yellow-900 text-yellow-300 border border-yellow-700'
-                }`}>
-                  {response.status} {response.statusText}
-                </span>
-                <span className="text-sm text-gray-400">
-                  {response.duration}ms
-                </span>
+              {/* Status and Duration */}
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-4">
+                  <span className={`px-3 py-1 rounded-full text-sm font-medium ${
+                    response.status >= 200 && response.status < 300
+                      ? 'bg-green-900 text-green-300 border border-green-700'
+                      : response.status >= 400
+                      ? 'bg-red-900 text-red-300 border border-red-700'
+                      : 'bg-yellow-900 text-yellow-300 border border-yellow-700'
+                  }`}>
+                    {response.status} {response.statusText}
+                  </span>
+                  <span className="text-sm text-gray-400">
+                    ⏱️ {response.duration}ms
+                  </span>
+                </div>
+                <div className="text-xs text-gray-500">
+                  {new Date().toLocaleTimeString()}
+                </div>
               </div>
 
-              {/* Response Data */}
+              {/* Quick Download Links */}
+              {(() => {
+                const downloadLinks = extractDownloadLinks(response.data);
+                if (downloadLinks.length > 0) {
+                  return (
+                    <div className="bg-blue-900 border border-blue-700 rounded-md p-4">
+                      <h3 className="text-sm font-medium text-blue-300 mb-3 flex items-center gap-2">
+                        📁 Quick Downloads
+                      </h3>
+                      <div className="flex flex-wrap gap-2">
+                        {downloadLinks.map((link, index) => (
+                          <a
+                            key={index}
+                            href={link.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-2 px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded text-sm font-medium transition-colors duration-200"
+                          >
+                            <span>{link.icon}</span>
+                            {link.title}
+                          </a>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                }
+                return null;
+              })()}
+
+              {/* Response Headers */}
+              {Object.keys(response.headers).length > 0 && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-1">
+                    Response Headers
+                  </label>
+                  <div className="bg-gray-800 border border-gray-600 rounded-md p-3 max-h-32 overflow-auto">
+                    {Object.entries(response.headers).map(([key, value]) => (
+                      <div key={key} className="text-xs text-gray-400 mb-1">
+                        <span className="text-blue-400">{key}:</span> {value}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Response Data - Clean Download Display */}
               <div>
-                <label className="block text-sm font-medium text-gray-300 mb-1">
-                  Response Data
-                </label>
-                <pre className="w-full p-3 bg-[#0e0e0e] border border-gray-600 rounded-md overflow-auto max-h-96 text-sm font-mono text-green-400">
-                  {formatJson(response.data)}
-                </pre>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-sm font-medium text-gray-300">
+                    Response Summary
+                  </label>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => navigator.clipboard.writeText(formatCleanedJson(response.data))}
+                      className="text-xs text-blue-400 hover:text-blue-300 px-2 py-1 bg-gray-800 rounded border border-gray-600"
+                      title="Copy raw JSON"
+                    >
+                      📋 Copy JSON
+                    </button>
+                    <button
+                      onClick={() => setShowRawJson(!showRawJson)}
+                      className="text-xs text-gray-400 hover:text-gray-300 px-2 py-1 bg-gray-800 rounded border border-gray-600"
+                      title="Toggle raw JSON view"
+                    >
+                      {showRawJson ? '👁️ Hide JSON' : '🔍 Show JSON'}
+                    </button>
+                  </div>
+                </div>
+                
+                {showRawJson ? (
+                  <pre className="w-full p-4 bg-black border border-gray-600 rounded-md overflow-auto max-h-96 text-sm font-mono text-green-400 leading-relaxed">
+                    {formatCleanedJson(response.data)}
+                  </pre>
+                ) : (
+                  <div className="w-full p-4 bg-black border border-gray-600 rounded-md">
+                    {(() => {
+                      const downloadLinks = extractDownloadLinks(response.data);
+                      
+                      if (downloadLinks.length > 0) {
+                        return (
+                          <div className="space-y-3">
+                            <div className="text-green-400 text-sm font-medium mb-3">
+                              ✅ Files Generated Successfully
+                            </div>
+                            {downloadLinks.map((link, index) => (
+                              <div key={index} className="bg-gray-800 rounded-md p-3 border border-gray-600">
+                                <div className="flex items-center justify-between">
+                                  <div className="flex items-center gap-3">
+                                    <span className="text-lg">{link.icon}</span>
+                                    <div>
+                                      <div className="text-white font-medium">{link.type} File</div>
+                                      <div className="text-xs text-gray-400">Ready for download</div>
+                                    </div>
+                                  </div>
+                                  <div className="flex gap-2">
+                                    <a
+                                      href={link.url}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="px-3 py-1 bg-green-600 hover:bg-green-700 text-white rounded text-sm font-medium transition-colors"
+                                    >
+                                      Download
+                                    </a>
+                                    <button
+                                      onClick={() => navigator.clipboard.writeText(link.url)}
+                                      className="px-2 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded text-xs transition-colors"
+                                      title="Copy URL"
+                                    >
+                                      📋
+                                    </button>
+                                  </div>
+                                </div>
+                                <div className="mt-2 text-xs text-gray-500 font-mono break-all">
+                                  {link.url}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        );
+                      } else {
+                        // No download links found, show summary of response
+                        return (
+                          <div className="space-y-2">
+                            <div className="text-green-400 text-sm font-medium">
+                              ✅ Request Completed Successfully
+                            </div>
+                            {Object.entries(response.data || {}).map(([key, value]) => (
+                              <div key={key} className="flex items-start gap-3 py-2 border-b border-gray-700 last:border-b-0">
+                                <span className="text-blue-400 text-sm font-medium min-w-0 flex-shrink-0 capitalize">
+                                  {key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())}:
+                                </span>
+                                <span className="text-gray-300 text-sm break-all">
+                                  {typeof value === 'object' ? JSON.stringify(value) : String(value)}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        );
+                      }
+                    })()}
+                  </div>
+                )}
+              </div>
+
+              {/* Response Size Info */}
+              <div className="flex justify-between text-xs text-gray-500 border-t border-gray-700 pt-2">
+                <span>
+                  Response Size: {new Blob([formatCleanedJson(response.data)]).size} bytes
+                </span>
+                <span>
+                  Type: {response.headers['content-type'] || 'JSON'}
+                </span>
               </div>
             </div>
           )}
 
           {error && (
             <div className="p-4 bg-red-900 border border-red-700 rounded-md">
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-red-300 font-semibold">❌ Error</span>
+                <span className="text-xs text-red-400">{new Date().toLocaleTimeString()}</span>
+              </div>
               <p className="text-red-300">{error}</p>
             </div>
           )}
